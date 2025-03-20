@@ -7,28 +7,24 @@ if ! command -v docker &> /dev/null; then
     exit 1
 fi
 
-# Check if docker-compose is installed
-if ! command -v docker-compose &> /dev/null; then
-    echo "docker-compose is not installed. Please install docker-compose first."
-    exit 1
-fi
-
-# For Windows/WSL users, make sure X server is running
-if [[ "$(uname -s)" == "Linux" && -z "$WSL_DISTRO_NAME" ]]; then
-    # For native Linux
-    # Update Docker config for X server
-    sed -i 's/DISPLAY=host.docker.internal:0.0/DISPLAY=$DISPLAY/' docker-compose.yml
-    sed -i 's/# network_mode/network_mode/' docker-compose.yml
-    sed -i 's/# environment:/environment:/' docker-compose.yml
-    sed -i 's/#   - DISPLAY/$DISPLAY/  - DISPLAY=$DISPLAY/' docker-compose.yml
-elif [[ "$(uname -s)" == "Linux" && ! -z "$WSL_DISTRO_NAME" ]]; then
-    # For WSL
-    echo "Running on WSL. Make sure X-server (like VcXsrv) is running on Windows."
-    sed -i 's/DISPLAY=host.docker.internal:0.0/DISPLAY=$DISPLAY/' docker-compose.yml
-fi
-
+# Build the Docker container
 echo "Building Docker container..."
-docker-compose build
+docker build -t bin-packing .
 
-echo "Starting Bin Packing application..."
-docker-compose up 
+echo "Starting Bin Packing Web Application..."
+echo "The application will be available at http://localhost:5000"
+
+# Run Docker container with port mapping
+docker run --rm -p 5000:5000 bin-packing
+
+# Open browser
+if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OSTYPE" == "cygwin" ]]; then
+    # Windows
+    start http://localhost:5000
+elif [[ "$OSTYPE" == "darwin"* ]]; then
+    # macOS
+    open http://localhost:5000
+else
+    # Linux
+    xdg-open http://localhost:5000 &> /dev/null || echo "Please open your browser and navigate to http://localhost:5000"
+fi 

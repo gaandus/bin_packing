@@ -1,6 +1,6 @@
 # Bin Packing Solver
 
-A simple graphical user interface for solving bin packing problems using the OR-Tools library.
+A web application for solving bin packing problems using the OR-Tools library.
 
 ## Overview
 
@@ -16,66 +16,69 @@ This application helps you solve bin packing problems by arranging items of diff
 - Detailed text output of the solution
 - Save and load problem configurations
 - Docker support
+- Web-based UI accessible from any browser
 
 ## Requirements
 
 ### For Local Run
 - Python 3.6 or higher
 - Required packages: 
-  - `ortools` (installed automatically if missing)
-  - `tkinter` (included in standard Python)
+  - `ortools`
+  - `flask`
 
 ### For Docker Run
 - Docker
-- Docker Compose
-- X11 server (for GUI display):
-  - Windows: VcXsrv or Xming
-  - macOS: XQuartz
-  - Linux: Built-in X server
 
 ## Usage
 
 ### Running Locally
 
-1. Run the application:
+1. Install the required packages:
    ```
-   python gui.py
+   pip install -r requirements.txt
    ```
 
-2. Enter the item weights as comma-separated values (e.g., "10, 20, 30, 40")
-3. Set the bin capacity (maximum weight per bin)
-4. Choose the objective:
-   - **Minimize Bins**: Use as few bins as possible
-   - **Maximize Weight**: Pack as much weight as possible
-5. Set the minimum items per bin (optional, default is 1)
-6. Click "Solve" to find the solution
-7. View the results in the Text Results tab or see the visualization in the Visualization tab
+2. Run the web application:
+   ```
+   python web_app.py
+   ```
 
-### Saving and Loading Configurations
-
-- Click "Save Config" to save your current problem settings to a JSON file
-- Click "Load Config" to load a previously saved configuration
-
-This feature allows you to reuse common problem configurations without having to re-enter all the values.
+3. Open your browser and navigate to `http://localhost:5000`
 
 ### Running with Docker
 
 1. Run the provided script:
    ```
+   # Linux/macOS
    ./run.sh
+   
+   # Windows
+   run_windows.bat
    ```
 
 This will:
-- Check for Docker and Docker Compose installation
-- Configure display settings based on your OS
-- Build and start the Docker container
-- Launch the bin packing application
+- Build the Docker container
+- Start the web application on port 5000
+- Automatically open your browser to the application
 
-#### Troubleshooting Docker GUI
+## Using the Application
 
-- **Windows**: Ensure VcXsrv or Xming is running with "Disable access control" checked
-- **macOS**: Run `xhost +` before starting the container
-- **Linux**: Run `xhost +local:docker` before starting the container
+1. Enter the item weights as comma-separated values (e.g., "10, 20, 30, 40")
+2. Set the bin capacity (maximum weight per bin)
+3. Choose the objective:
+   - **Minimize Bins**: Use as few bins as possible
+   - **Maximize Weight**: Pack as much weight as possible
+4. Set the minimum items per bin (optional, default is 1)
+5. Click "Solve" to find the solution
+6. View the results, including:
+   - Text summary with bin count and fill rates
+   - Visual representation of bins and items
+   - Detailed bin-by-bin breakdown
+
+### Saving and Loading Configurations
+
+- Click "Save Config" to save your current problem settings
+- Click "Load Config" to load a previously saved configuration
 
 ## Example
 

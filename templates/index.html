@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Bin Packing Solver</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.3/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container my-4">
+        <div class="dark-mode-toggle">
+            <button id="darkModeToggle" class="btn btn-sm" title="Switch to Dark Mode">
+                <i class="bi bi-moon-fill"></i>
+            </button>
+        </div>
+        
+        <h1 class="text-center mb-4">Bin Packing Solver</h1>
+        
+        <div class="row">
+            <div class="col-lg-8 mx-auto">
+                <div class="card mb-4 shadow-sm">
+                    <div class="card-header bg-light">
+                        <h4>Input Parameters</h4>
+                    </div>
+                    <div class="card-body">
+                        <form id="binPackingForm">
+                            <div class="row mb-3">
+                                <div class="col-md-9">
+                                    <label for="weights" class="form-label">Item Weights (comma-separated)</label>
+                                    <div class="input-group">
+                                        <input type="text" class="form-control" id="weights" name="weights" placeholder="10, 20, 30, 40, 50" value="10, 15, 20, 25, 30, 35, 40, 45, 50" required>
+                                        <button class="btn btn-outline-secondary" type="button" id="randomWeights">
+                                            <i class="bi bi-shuffle"></i> Random
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <label for="binCapacity" class="form-label">Bin Capacity</label>
+                                    <input type="number" class="form-control" id="binCapacity" name="binCapacity" placeholder="100" value="70" min="1" required>
+                                </div>
+                            </div>
+                            
+                            <!-- Random Weight Generator Options -->
+                            <div id="randomWeightOptions" class="mb-3 card card-body bg-light" style="display: none;">
+                                <div class="row">
+                                    <div class="col-md-4">
+                                        <label for="randomWeightCount" class="form-label">Count</label>
+                                        <input type="number" class="form-control" id="randomWeightCount" value="10" min="1" max="100">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label for="randomWeightMin" class="form-label">Min Weight</label>
+                                        <input type="number" class="form-control" id="randomWeightMin" value="1" min="1">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label for="randomWeightMax" class="form-label">Max Weight</label>
+                                        <input type="number" class="form-control" id="randomWeightMax" value="20" min="1">
+                                    </div>
+                                </div>
+                                <div class="form-check mt-2">
+                                    <input class="form-check-input" type="checkbox" id="includeLabels">
+                                    <label class="form-check-label" for="includeLabels">
+                                        Generate labels for items
+                                    </label>
+                                </div>
+                                <button type="button" id="generateWeights" class="btn btn-primary btn-sm mt-2">Generate Weights</button>
+                            </div>
+                            
+                            <!-- Item Labels -->
+                            <div class="mb-3">
+                                <label for="itemLabels" class="form-label">Item Labels (optional, comma-separated)</label>
+                                <input type="text" class="form-control" id="itemLabels" name="itemLabels" placeholder="Item A, Item B, Item C">
+                                <div class="form-text">If provided, should match the number of weights. Leave empty to use default item numbers.</div>
+                            </div>
+                            
+                            <!-- Sorting Options -->
+                            <div class="mb-3">
+                                <label for="sortItems" class="form-label">Sort Items Before Packing</label>
+                                <select class="form-select" id="sortItems">
+                                    <option value="none">No sorting</option>
+                                    <option value="desc">Descending (heaviest first)</option>
+                                    <option value="asc">Ascending (lightest first)</option>
+                                    <option value="random">Random shuffle</option>
+                                </select>
+                                <div class="form-text">Sorting items before packing can sometimes result in better solutions.</div>
+                            </div>
+                            
+                            <h5 class="mb-3">Objective</h5>
+                            <div class="mb-3">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="objective" id="minBins" value="min_bins" checked>
+                                    <label class="form-check-label" for="minBins">
+                                        Minimize number of bins
+                                    </label>
+                                    <div class="form-text small">Uses as few bins as possible to pack all items.</div>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="objective" id="maxWeight" value="max_weight">
+                                    <label class="form-check-label" for="maxWeight">
+                                        Maximize weight in each bin
+                                    </label>
+                                    <div class="form-text small">Fills each bin to maximum capacity before using another bin.</div>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="objective" id="maxItems" value="max_items">
+                                    <label class="form-check-label" for="maxItems">
+                                        Maximize items in each bin
+                                    </label>
+                                    <div class="form-text small">Prioritizes putting as many items as possible in each bin before using another.</div>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="objective" id="balanceBins" value="balance_bins">
+                                    <label class="form-check-label" for="balanceBins">
+                                        Balance weight across bins
+                                    </label>
+                                    <div class="form-text small">Distributes weight evenly across a fixed number of bins.</div>
+                                </div>
+                            </div>
+                            
+                            <!-- Bin Count for balance_bins -->
+                            <div id="binCountContainer" class="mb-3" style="display: none;">
+                                <label for="binCount" class="form-label">Number of Bins</label>
+                                <input type="number" class="form-control" id="binCount" value="3" min="2" max="20">
+                                <div class="form-text">Specify how many bins to use for balanced weight distribution.</div>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="minItems" class="form-label">Minimum Items Per Bin</label>
+                                <input type="number" class="form-control" id="minItems" name="minItems" placeholder="1" min="1" value="1">
+                                <div class="form-text">Minimum number of items that must be in each used bin.</div>
+                            </div>
+                            
+                            <div class="d-grid gap-2 d-md-flex justify-content-md-center mt-4">
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="bi bi-boxes"></i> Solve
+                                </button>
+                                <button type="button" id="compareButton" class="btn btn-outline-primary">
+                                    <i class="bi bi-bar-chart"></i> Compare Strategies
+                                </button>
+                                <div>
+                                    <button type="button" id="saveConfig" class="btn btn-outline-secondary">
+                                        <i class="bi bi-save"></i> Save
+                                    </button>
+                                    <button type="button" id="loadConfig" class="btn btn-outline-secondary">
+                                        <i class="bi bi-folder"></i> Load
+                                    </button>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+                
+                <!-- Results Card -->
+                <div class="card shadow-sm" id="resultsCard" style="display: none;">
+                    <div class="card-header bg-light">
+                        <h4>Results</h4>
+                    </div>
+                    <div class="card-body">
+                        <!-- Summary Section -->
+                        <div id="resultsSummary" class="mb-4"></div>
+                        
+                        <!-- Visualization Section -->
+                        <h5>Visualization</h5>
+                        <div id="visualization" class="mb-4"></div>
+                        
+                        <!-- Detailed Results Section -->
+                        <h5 class="mt-4">Detailed Results</h5>
+                        <div id="detailedResults"></div>
+                    </div>
+                </div>
+                
+                <!-- Comparison Card -->
+                <div class="card shadow-sm" id="comparisonCard" style="display: none;">
+                    <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                        <h4>Strategy Comparison</h4>
+                        <button id="closeComparison" class="btn btn-sm btn-outline-secondary">
+                            <i class="bi bi-x-lg"></i>
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <div id="comparisonResults"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Configs Modal -->
+    <div class="modal fade" id="configsModal" tabindex="-1" aria-labelledby="configsModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="configsModalLabel">Saved Configurations</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="list-group" id="configsList">
+                        <!-- Saved configurations will be loaded here -->
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="back-to-top" id="backToTop">
+        <i class="bi bi-arrow-up"></i>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html> 
