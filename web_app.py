@@ -1,338 +1,254 @@
-from flask import Flask, render_template, request, jsonify
+import os
 import json
+import time
+from datetime import datetime
+from flask import Flask, render_template, request, jsonify
 from solver import solve_bin_packing
-import random
 
 app = Flask(__name__)
 
+# Ensure the configs directory exists
+CONFIGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
+os.makedirs(CONFIGS_DIR, exist_ok=True)
+
+# Store configs in a file
+CONFIGS_FILE = os.path.join(CONFIGS_DIR, 'configs.json')
+if not os.path.exists(CONFIGS_FILE):
+    with open(CONFIGS_FILE, 'w') as f:
+        json.dump([], f)
+
+# Define routes
 @app.route('/')
 def index():
     return render_template('index.html')
 
 @app.route('/api/solve', methods=['POST'])
-def solve():
+def api_solve():
     try:
-        data = request.json
-        
         # Parse input data
+        data = request.json
         weights = data.get('weights', [])
-        bin_capacity = data.get('bin_capacity', 0)
+        bin_capacity = data.get('bin_capacity', 100)
         objective = data.get('objective', 'min_bins')
         min_items_per_bin = data.get('min_items_per_bin', 1)
-        
-        # New parameters
         sort_method = data.get('sort_method', 'none')
-        bin_count = data.get('bin_count', 3)
+        bin_count = data.get('bin_count', None)
         item_labels = data.get('item_labels', [])
         
-        # Validate inputs
+        # Validate input
         if not weights:
-            return jsonify({"error": "Please enter at least one weight"}), 400
-                
+            return jsonify({'error': 'No weights provided'}), 400
+        
         if bin_capacity <= 0:
-            return jsonify({"error": "Bin capacity must be positive"}), 400
-                
+            return jsonify({'error': 'Bin capacity must be positive'}), 400
+        
         if min_items_per_bin <= 0:
-            return jsonify({"error": "Minimum items per bin must be positive"}), 400
+            return jsonify({'error': 'Minimum items per bin must be positive'}), 400
         
-        if objective == 'balance_bins' and (bin_count is None or bin_count < 2):
-            return jsonify({"error": "For balanced bins, you must specify at least 2 bins"}), 400
+        if objective == 'balance_bins' and (not bin_count or bin_count <= 0):
+            return jsonify({'error': 'Number of bins must be positive for balance_bins objective'}), 400
         
-        # Apply sorting if requested
-        if sort_method != 'none':
-            # Create a list of (index, weight) tuples to preserve original indices
-            indexed_weights = list(enumerate(weights))
-            
-            if sort_method == 'desc':
-                # Sort descending by weight
-                indexed_weights.sort(key=lambda x: x[1], reverse=True)
-            elif sort_method == 'asc':
-                # Sort ascending by weight
-                indexed_weights.sort(key=lambda x: x[1])
-            elif sort_method == 'random':
-                # Random shuffle
-                random.shuffle(indexed_weights)
-            
-            # Extract the original indices and the sorted weights
-            original_indices = [idx for idx, _ in indexed_weights]
-            sorted_weights = [weight for _, weight in indexed_weights]
-            
-            # Map original item labels to new positions if provided
-            if item_labels and len(item_labels) == len(weights):
-                sorted_labels = [item_labels[idx] for idx in original_indices]
-            else:
-                sorted_labels = None
-                
-            # Use sorted weights for solving
-            solver_weights = sorted_weights
-            solver_labels = sorted_labels
-        else:
-            # No sorting, use original weights and labels
-            solver_weights = weights
-            original_indices = list(range(len(weights)))
-            solver_labels = item_labels if item_labels and len(item_labels) == len(weights) else None
+        # Apply sorting if specified
+        original_weights = weights.copy()
+        if sort_method == 'desc':
+            # Sort weights in descending order
+            indices = sorted(range(len(weights)), key=lambda i: weights[i], reverse=True)
+            weights = [weights[i] for i in indices]
+            # Reorder labels if present
+            if item_labels:
+                item_labels = [item_labels[i] for i in indices]
+        elif sort_method == 'asc':
+            # Sort weights in ascending order
+            indices = sorted(range(len(weights)), key=lambda i: weights[i])
+            weights = [weights[i] for i in indices]
+            # Reorder labels if present
+            if item_labels:
+                item_labels = [item_labels[i] for i in indices]
+        elif sort_method == 'random':
+            # Random shuffle
+            import random
+            indices = list(range(len(weights)))
+            random.shuffle(indices)
+            weights = [weights[i] for i in indices]
+            # Reorder labels if present
+            if item_labels:
+                item_labels = [item_labels[i] for i in indices]
         
-        # Solve the problem
-        result, error_message = solve_bin_packing(
-            solver_weights, 
-            bin_capacity, 
-            objective, 
-            min_items_per_bin,
-            bin_count if objective == 'balance_bins' else None,
-            solver_labels
+        # Call the solver
+        start_time = time.time()
+        result = solve_bin_packing(
+            weights=weights,
+            bin_capacity=bin_capacity,
+            objective=objective,
+            min_items_per_bin=min_items_per_bin,
+            bin_count=bin_count,
+            item_labels=item_labels
         )
         
-        if result is None:
-            detailed_error = error_message or "No solution found. Try adjusting parameters."
-            return jsonify({"error": detailed_error}), 400
+        # If result contains an error, return it
+        if 'error' in result:
+            return jsonify(result), 400
         
-        # Process results - map back to original indices if sorting was applied
-        processed_result = []
+        # Calculate total weight
+        total_weight = sum(sum(bin_data.get('item_weights', [])) for bin_data in result['bins'])
         
-        for bin_id, items in result.items():
-            # Get original item indices if sorting was applied
-            original_item_indices = [original_indices[i] for i in items]
-            
-            # Get item weights
-            item_weights = [weights[i] for i in original_item_indices]
-            
-            # Get item labels if available
-            item_label_values = None
-            if item_labels and len(item_labels) >= len(weights):
-                item_label_values = [item_labels[i] for i in original_item_indices]
-            
-            bin_weight = sum(item_weights)
-            fill_ratio = bin_weight / bin_capacity
-            
-            bin_data = {
-                "bin_id": bin_id,
-                "items": original_item_indices,
-                "item_weights": item_weights,
-                "total_weight": bin_weight,
-                "capacity": bin_capacity,
-                "fill_ratio": fill_ratio
-            }
-            
-            # Add labels if available
-            if item_label_values:
-                bin_data["item_labels"] = item_label_values
-                
-            processed_result.append(bin_data)
-            
-        response_data = {
-            "success": True,
-            "bins": processed_result,
-            "bin_count": len(result),
-            "total_weight": sum(weights),
-            "sort_method": sort_method
-        }
+        # Add computation time
+        result['computation_time'] = round(time.time() - start_time, 3)
+        result['total_weight'] = total_weight
         
-        # Include warning message if one was returned
-        if error_message:
-            response_data["warning"] = error_message
-            
-        return jsonify(response_data)
-            
+        # Add warning if needed
+        if max(weights) > bin_capacity:
+            result['warning'] = 'Some items exceed bin capacity and cannot be packed'
+        
+        return jsonify(result)
+    
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        app.logger.error(f"Error in API: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/compare', methods=['POST'])
-def compare_strategies():
+def api_compare():
     try:
-        data = request.json
-        
         # Parse input data
+        data = request.json
         weights = data.get('weights', [])
-        bin_capacity = data.get('bin_capacity', 0)
+        bin_capacity = data.get('bin_capacity', 100)
         min_items_per_bin = data.get('min_items_per_bin', 1)
         sort_method = data.get('sort_method', 'none')
         bin_count = data.get('bin_count', 3)
         item_labels = data.get('item_labels', [])
         
-        # Validate inputs
-        if not weights:
-            return jsonify({"error": "Please enter at least one weight"}), 400
-                
-        if bin_capacity <= 0:
-            return jsonify({"error": "Bin capacity must be positive"}), 400
-                
-        if min_items_per_bin <= 0:
-            return jsonify({"error": "Minimum items per bin must be positive"}), 400
+        # Apply sorting if specified
+        original_weights = weights.copy()
+        if sort_method == 'desc':
+            # Sort weights in descending order
+            indices = sorted(range(len(weights)), key=lambda i: weights[i], reverse=True)
+            weights = [weights[i] for i in indices]
+            # Reorder labels if present
+            if item_labels:
+                item_labels = [item_labels[i] for i in indices]
+        elif sort_method == 'asc':
+            # Sort weights in ascending order
+            indices = sorted(range(len(weights)), key=lambda i: weights[i])
+            weights = [weights[i] for i in indices]
+            # Reorder labels if present
+            if item_labels:
+                item_labels = [item_labels[i] for i in indices]
+        elif sort_method == 'random':
+            # Random shuffle
+            import random
+            indices = list(range(len(weights)))
+            random.shuffle(indices)
+            weights = [weights[i] for i in indices]
+            # Reorder labels if present
+            if item_labels:
+                item_labels = [item_labels[i] for i in indices]
         
-        # Define strategies to compare
-        strategies = ['min_bins', 'max_weight', 'max_items', 'balance_bins']
+        # Compare different objectives
+        objectives = ['min_bins', 'max_weight', 'max_items', 'balance_bins']
         results = {}
         
-        # Apply sorting if requested
-        if sort_method != 'none':
-            # Create a list of (index, weight) tuples to preserve original indices
-            indexed_weights = list(enumerate(weights))
-            
-            if sort_method == 'desc':
-                # Sort descending by weight
-                indexed_weights.sort(key=lambda x: x[1], reverse=True)
-            elif sort_method == 'asc':
-                # Sort ascending by weight
-                indexed_weights.sort(key=lambda x: x[1])
-            elif sort_method == 'random':
-                # Random shuffle
-                random.shuffle(indexed_weights)
-            
-            # Extract the original indices and the sorted weights
-            original_indices = [idx for idx, _ in indexed_weights]
-            sorted_weights = [weight for _, weight in indexed_weights]
-            
-            # Map original item labels to new positions if provided
-            if item_labels and len(item_labels) == len(weights):
-                sorted_labels = [item_labels[idx] for idx in original_indices]
-            else:
-                sorted_labels = None
-                
-            # Use sorted weights for solving
-            solver_weights = sorted_weights
-            solver_labels = sorted_labels
-        else:
-            # No sorting, use original weights and labels
-            solver_weights = weights
-            original_indices = list(range(len(weights)))
-            solver_labels = item_labels if item_labels and len(item_labels) == len(weights) else None
-        
-        # Run each strategy
-        for strategy in strategies:
+        for objective in objectives:
             # Skip balance_bins if bin_count is not valid
-            if strategy == 'balance_bins' and (bin_count is None or bin_count < 2):
-                results[strategy] = {
-                    "error": "For balanced bins, you must specify at least 2 bins",
-                    "success": False
+            if objective == 'balance_bins' and (not bin_count or bin_count <= 0):
+                results[objective] = {
+                    'success': False,
+                    'error': 'Number of bins must be positive for balance_bins objective'
                 }
                 continue
-                
-            # Solve with current strategy
-            result, error_message = solve_bin_packing(
-                solver_weights, 
-                bin_capacity, 
-                strategy, 
-                min_items_per_bin,
-                bin_count if strategy == 'balance_bins' else None,
-                solver_labels
-            )
             
-            if result is None:
-                results[strategy] = {
-                    "error": error_message or "No solution found",
-                    "success": False
-                }
-                continue
+            try:
+                # Call the solver
+                start_time = time.time()
+                result = solve_bin_packing(
+                    weights=weights.copy(),
+                    bin_capacity=bin_capacity,
+                    objective=objective,
+                    min_items_per_bin=min_items_per_bin,
+                    bin_count=(bin_count if objective == 'balance_bins' else None),
+                    item_labels=item_labels.copy() if item_labels else []
+                )
                 
-            # Process results - map back to original indices
-            processed_result = []
-            
-            for bin_id, items in result.items():
-                # Get original item indices
-                original_item_indices = [original_indices[i] for i in items]
+                # Check for solver error
+                if 'error' in result:
+                    results[objective] = {
+                        'success': False,
+                        'error': result['error']
+                    }
+                    continue
                 
-                # Get item weights
-                item_weights = [weights[i] for i in original_item_indices]
+                # Calculate statistics
+                bin_count = result['bin_count']
+                total_weight = sum(sum(bin_data.get('item_weights', [])) for bin_data in result['bins'])
+                avg_fill_ratio = sum(bin_data['total_weight'] / bin_data['capacity'] for bin_data in result['bins']) / bin_count
                 
-                # Get item labels if available
-                item_label_values = None
-                if item_labels and len(item_labels) >= len(weights):
-                    item_label_values = [item_labels[i] for i in original_item_indices]
-                
-                bin_weight = sum(item_weights)
-                fill_ratio = bin_weight / bin_capacity
-                
-                bin_data = {
-                    "bin_id": bin_id,
-                    "items": original_item_indices,
-                    "item_weights": item_weights,
-                    "total_weight": bin_weight,
-                    "capacity": bin_capacity,
-                    "fill_ratio": fill_ratio
+                # Store results
+                results[objective] = {
+                    'success': True,
+                    'bin_count': bin_count,
+                    'total_weight': total_weight,
+                    'avg_fill_ratio': avg_fill_ratio,
+                    'computation_time': round(time.time() - start_time, 3),
+                    'bins': result['bins']
                 }
                 
-                # Add labels if available
-                if item_label_values:
-                    bin_data["item_labels"] = item_label_values
-                    
-                processed_result.append(bin_data)
+                # Add warning if needed
+                if max(weights) > bin_capacity:
+                    results[objective]['warning'] = 'Some items exceed bin capacity'
                 
-            # Calculate statistics
-            bin_count = len(result)
-            total_weight = sum(weights)
-            avg_fill = sum(bin_data["fill_ratio"] for bin_data in processed_result) / bin_count if bin_count > 0 else 0
-            
-            # Store the results
-            results[strategy] = {
-                "success": True,
-                "bins": processed_result,
-                "bin_count": bin_count,
-                "total_weight": total_weight,
-                "avg_fill_ratio": avg_fill,
-                "warning": error_message
-            }
-            
-        return jsonify({
-            "success": True,
-            "results": results,
-            "sort_method": sort_method
-        })
-            
+            except Exception as e:
+                results[objective] = {
+                    'success': False,
+                    'error': str(e)
+                }
+        
+        return jsonify({'results': results})
+    
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        app.logger.error(f"Error in comparison API: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/save_config', methods=['POST'])
-def save_config():
+def api_save_config():
     try:
-        # Get configuration from request
-        config = request.json
+        # Parse input data
+        data = request.json
         
-        # Generate a filename based on timestamp
-        filename = f"config_{config.get('bin_capacity')}_{len(config.get('weights', []))}.json"
+        # Load existing configs
+        with open(CONFIGS_FILE, 'r') as f:
+            configs = json.load(f)
         
-        # Save to file
-        with open(f"./configs/{filename}", 'w') as f:
-            json.dump(config, f, indent=2)
-            
-        return jsonify({"success": True, "filename": filename})
+        # Add timestamp
+        data['timestamp'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
+        # Add to configs
+        configs.append(data)
+        
+        # Save configs
+        with open(CONFIGS_FILE, 'w') as f:
+            json.dump(configs, f, indent=2)
+        
+        return jsonify({'success': True})
+    
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        app.logger.error(f"Error saving config: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/load_configs', methods=['GET'])
-def load_configs():
-    import os
-    import glob
-    
+def api_load_configs():
     try:
-        # List all config files
-        config_files = glob.glob("./configs/*.json")
-        configs = []
+        # Load configs
+        with open(CONFIGS_FILE, 'r') as f:
+            configs = json.load(f)
         
-        for file_path in config_files:
-            try:
-                with open(file_path, 'r') as f:
-                    config = json.load(f)
-                    config['filename'] = os.path.basename(file_path)
-                    configs.append(config)
-            except:
-                pass
-                
-        return jsonify({"success": True, "configs": configs})
+        # Sort by timestamp (newest first)
+        configs.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
+        
+        return jsonify({'configs': configs})
+    
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/load_config/<filename>', methods=['GET'])
-def load_config(filename):
-    try:
-        with open(f"./configs/{filename}", 'r') as f:
-            config = json.load(f)
-            
-        return jsonify({"success": True, "config": config})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        app.logger.error(f"Error loading configs: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    import os
-    # Create configs directory if it doesn't exist
-    os.makedirs('./configs', exist_ok=True)
-    app.run(host='0.0.0.0', port=5000, debug=True) 
+    app.run(host='0.0.0.0', port=5000) 
