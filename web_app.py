@@ -77,12 +77,12 @@ def api_solve():
         # Call the solver
         start_time = time.time()
         result = solve_bin_packing(
-            weights=weights,
-            bin_capacity=bin_capacity,
-            objective=objective,
-            min_items_per_bin=min_items_per_bin,
-            bin_count=bin_count,
-            item_labels=item_labels
+            weights,
+            bin_capacity,
+            objective,
+            min_items_per_bin,
+            bin_count,
+            item_labels
         )
         
         # If result contains an error, return it
@@ -161,12 +161,12 @@ def api_compare():
                 # Call the solver
                 start_time = time.time()
                 result = solve_bin_packing(
-                    weights=weights.copy(),
-                    bin_capacity=bin_capacity,
-                    objective=objective,
-                    min_items_per_bin=min_items_per_bin,
-                    bin_count=(bin_count if objective == 'balance_bins' else None),
-                    item_labels=item_labels.copy() if item_labels else []
+                    weights.copy(),
+                    bin_capacity,
+                    objective,
+                    min_items_per_bin,
+                    (bin_count if objective == 'balance_bins' else None),
+                    item_labels.copy() if item_labels else []
                 )
                 
                 # Check for solver error

@@ -29,52 +29,55 @@ def solve_bin_packing(order_weights, bin_capacity, objective='min_bins', min_ite
     item_labels: Optional labels for items (used for result reporting).
     
     Returns:
-      - A dictionary of packed bins if solution is found
-      - A tuple (None, error_message) if no solution is found
+      - A dictionary with solution details including bins, bin_count, etc.
     """
     # Validate inputs
     if not order_weights:
-        return None, "No weights provided to pack"
+        return {"error": "No weights provided to pack"}
     
     if bin_capacity <= 0:
-        return None, "Bin capacity must be positive"
+        return {"error": "Bin capacity must be positive"}
+
+    if objective == 'balance_bins' and (bin_count is None or bin_count < 2):
+        return {"error": "For balanced bins, you must specify at least 2 bins"}
+        
+    # Handle edge case where number of items is less than min_items_per_bin
+    if len(order_weights) < min_items_per_bin:
+        return {"error": f"Not enough items to meet minimum of {min_items_per_bin} items per bin"}
     
     # Check if any individual weight exceeds bin capacity
     overweight_items = [(i, w) for i, w in enumerate(order_weights) if w > bin_capacity]
     if overweight_items:
         items_str = ", ".join([f"item {i} (weight {w})" for i, w in overweight_items])
-        return None, f"Some items exceed bin capacity: {items_str}"
+        return {"error": f"Some items exceed bin capacity: {items_str}"}
     
     # Check if min_items_per_bin is feasible
     if min_items_per_bin * max(order_weights) > bin_capacity:
-        return None, f"Minimum items per bin ({min_items_per_bin}) cannot fit within bin capacity due to weight constraints"
+        return {"error": f"Minimum items per bin ({min_items_per_bin}) cannot fit within bin capacity due to weight constraints"}
     
     # Check if minimum items constraint is feasible with number of items
     total_items = len(order_weights)
     max_bins_possible = total_items // min_items_per_bin
     if max_bins_possible == 0 and total_items > 0:
-        return None, f"Not enough items ({total_items}) to satisfy minimum items per bin ({min_items_per_bin})"
+        return {"error": f"Not enough items ({total_items}) to satisfy minimum items per bin ({min_items_per_bin})"}
     
     # For balance_bins, check that bin_count is provided and reasonable
     if objective == 'balance_bins':
-        if bin_count is None or bin_count < 2:
-            return None, "For 'balance_bins' objective, you must specify at least 2 bins"
-        
         total_weight = sum(order_weights)
         avg_bin_weight = total_weight / bin_count
         
         if avg_bin_weight > bin_capacity:
-            return None, f"Cannot balance {total_weight} weight across {bin_count} bins (average {avg_bin_weight:.1f}) with capacity {bin_capacity}"
+            return {"error": f"Cannot balance {total_weight} weight across {bin_count} bins (average {avg_bin_weight:.1f}) with capacity {bin_capacity}"}
         
         if total_items < bin_count:
-            return None, f"Not enough items ({total_items}) to distribute across {bin_count} bins"
+            return {"error": f"Not enough items ({total_items}) to distribute across {bin_count} bins"}
     
     data = create_data_model(order_weights, bin_capacity)
     
     # Create the solver
     solver = pywraplp.Solver.CreateSolver('SCIP')
     if not solver:
-        return None, "Failed to create solver instance"
+        return {"error": "Failed to create solver instance"}
     
     # Variables
     x = {}
@@ -215,49 +218,76 @@ def solve_bin_packing(order_weights, bin_capacity, objective='min_bins', min_ite
     # Time limit for solving (10 seconds)
     solver.SetTimeLimit(10000)  # milliseconds
     
+    # Solve the problem
     status = solver.Solve()
     
-    if status == pywraplp.Solver.OPTIMAL or status == pywraplp.Solver.FEASIBLE:
+    # Process results
+    if status == pywraplp.Solver.OPTIMAL:
+        # Get items in each bin
         packed_bins = {}
         for j in data['bins']:
-            if y[j].solution_value() > 0.5:  # Using > 0.5 to handle potential floating-point issues
-                items_in_bin = [i for i in data['items'] if x[i, j].solution_value() > 0.5]
-                if items_in_bin:  # Only add bins that have items
-                    packed_bins[j] = items_in_bin
-        
-        # Check if no solution was found despite solver reporting success
-        if not packed_bins:
-            return None, "Could not find a valid solution that satisfies all constraints"
-        
-        warning_message = None
-        if status == pywraplp.Solver.FEASIBLE:
-            warning_message = "Found a solution, but it may not be optimal"
+            if y[j].solution_value() > 0.5:  # Binary variable, should be very close to 0 or 1
+                bin_items = []
+                for i in data['items']:
+                    if x[(i, j)].solution_value() > 0.5:
+                        bin_items.append(i)
+                if bin_items:  # Only include non-empty bins
+                    packed_bins[j] = bin_items
+                    
+        # Format the result for the frontend
+        result_bins = []
+        for bin_id, items in packed_bins.items():
+            # Get item weights
+            item_weights = [order_weights[i] for i in items]
+            bin_weight = sum(item_weights)
+            fill_ratio = bin_weight / bin_capacity
             
-        # For balance_bins, calculate statistics on the balance achieved
-        if objective == 'balance_bins' and packed_bins:
-            bin_weights = [sum(order_weights[i] for i in items) for j, items in packed_bins.items()]
+            bin_data = {
+                "bin_id": bin_id,
+                "items": items,
+                "item_weights": item_weights,
+                "total_weight": bin_weight,
+                "capacity": bin_capacity,
+                "fill_ratio": fill_ratio
+            }
+            
+            # Add labels if available
+            if item_labels and len(item_labels) >= len(order_weights):
+                bin_data["item_labels"] = [item_labels[i] for i in items]
+                
+            result_bins.append(bin_data)
+        
+        # Create the final result dictionary
+        result = {
+            "bins": result_bins,
+            "bin_count": len(packed_bins),
+            "objective": objective
+        }
+        
+        # Add warning if relevant
+        if objective == 'balance_bins' and bin_count > 1:
+            bin_weights = [sum(order_weights[i] for i in items) for items in packed_bins.values()]
             avg_weight = sum(bin_weights) / len(bin_weights)
             max_deviation = max(abs(w - avg_weight) for w in bin_weights)
             max_deviation_pct = (max_deviation / avg_weight) * 100 if avg_weight > 0 else 0
             
-            if max_deviation_pct > 20:  # If deviation is more than 20%
-                if warning_message:
-                    warning_message += f". Bins are not well balanced (max deviation: {max_deviation_pct:.1f}%)"
-                else:
-                    warning_message = f"Bins are not well balanced (max deviation: {max_deviation_pct:.1f}%)"
+            if max_deviation_pct > 15:  # Arbitrary threshold for warning
+                result["warning"] = f"Bins are not well balanced (max deviation: {max_deviation_pct:.1f}%)"
         
-        return packed_bins, warning_message
-    elif status == pywraplp.Solver.INFEASIBLE:
-        return None, "The problem is infeasible. Try relaxing some constraints."
-    elif status == pywraplp.Solver.UNBOUNDED:
-        return None, "The problem is unbounded. Check your objective function."
-    elif status == pywraplp.Solver.NOT_SOLVED:
-        if solver.WallTime() >= 10000:
-            return None, "Time limit exceeded. Try simplifying the problem or adjusting parameters."
-        else:
-            return None, "The problem could not be solved. Please check your inputs."
+        return result
     else:
-        return None, "Unknown solver status. Please try again with different parameters."
+        # No feasible solution found
+        if status == pywraplp.Solver.INFEASIBLE:
+            return {"error": "No feasible solution exists with these constraints"}
+        elif status == pywraplp.Solver.UNBOUNDED:
+            return {"error": "The problem is unbounded. Check your objective function."}
+        elif status == pywraplp.Solver.NOT_SOLVED:
+            if solver.WallTime() >= 10000:
+                return {"error": "Time limit exceeded. Try simplifying the problem or adjusting parameters."}
+            else:
+                return {"error": "The problem could not be solved. Please check your inputs."}
+        else:
+            return {"error": "Unknown solver status. Please try again with different parameters."}
 
 # Example usage
 if __name__ == "__main__":
@@ -266,10 +296,8 @@ if __name__ == "__main__":
     objective = 'min_bins'  # Options: 'min_bins', 'max_weight', 'max_items', 'balance_bins'
     min_items_per_bin = 2  # Minimum number of items per bin
     bin_count = 3  # For 'balance_bins' objective
-    result, error = solve_bin_packing(order_weights, bin_capacity, objective, min_items_per_bin, bin_count)
-    if result:
-        print("Packed Bins:", result)
-        if error:
-            print("Note:", error)
+    result = solve_bin_packing(order_weights, bin_capacity, objective, min_items_per_bin, bin_count)
+    if result.get("error"):
+        print("Error:", result["error"])
     else:
-        print("Error:", error)
+        print("Packed Bins:", result)
