@@ -20,11 +20,6 @@ wheels/
 .installed.cfg
 *.egg
 
-# Docker
-.dockerignore
-Dockerfile
-docker-compose.yml
-
 # Virtual Environment
 venv/
 env/

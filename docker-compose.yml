@@ -1,0 +1,17 @@
+version: '3'
+
+services:
+  bin-packing:
+    build: .
+    restart: always
+    container_name: bin-packing
+    ports:
+      - "127.0.0.1:5000:5000"
+    volumes:
+      - ./data:/app/data
+    networks:
+      - web
+
+networks:
+  web:
+    external: true 
